@@ -1,6 +1,6 @@
 # ============================================
 # WORKING DOCKERFILE FOR RENDER DEPLOYMENT
-# Uses specific liboqs version and selective algorithm build
+# Enables Kyber768 and Dilithium3
 # ============================================
 
 FROM python:3.11-slim
@@ -18,8 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Build liboqs - NEW METHOD (without OQS_MINIMAL_BUILD)
-# We disable most algorithms except Kyber
+# Build liboqs with Kyber and Dilithium3 enabled
 WORKDIR /tmp
 RUN git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git && \
     cd liboqs && \
@@ -31,12 +30,14 @@ RUN git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git && \
         -DOQS_ENABLE_KEM_NTRUPRIME=OFF \
         -DOQS_ENABLE_KEM_BIKE=OFF \
         -DOQS_ENABLE_KEM_HQC=OFF \
-        -DOQS_ENABLE_SIG_DILITHIUM=ON \
-        -DOQS_ENABLE_SIG_FALCON=OFF \
-        -DOQS_ENABLE_SIG_SPHINCS=OFF \
         -DOQS_ENABLE_KEM_KYBER_512=ON \
         -DOQS_ENABLE_KEM_KYBER_768=ON \
         -DOQS_ENABLE_KEM_KYBER_1024=ON \
+        -DOQS_ENABLE_SIG_DILITHIUM_2=OFF \
+        -DOQS_ENABLE_SIG_DILITHIUM_3=ON \
+        -DOQS_ENABLE_SIG_DILITHIUM_5=OFF \
+        -DOQS_ENABLE_SIG_FALCON=OFF \
+        -DOQS_ENABLE_SIG_SPHINCS=OFF \
         -DBUILD_SHARED_LIBS=ON \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
         .. && \

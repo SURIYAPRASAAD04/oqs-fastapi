@@ -15,7 +15,7 @@ from pydantic import BaseModel
 app = FastAPI(
     title="Post-Quantum Cryptography API",
     description="Kyber768 KEM + Dilithium3 Signatures using liboqs",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 app.add_middleware(
@@ -42,6 +42,7 @@ class KyberDecapRequest(BaseModel):
 
 class DilithiumSignRequest(BaseModel):
     message: str
+    private_key: str  # Now required for signing
 
 
 class DilithiumVerifyRequest(BaseModel):
@@ -62,6 +63,7 @@ def root():
         "signature": "Dilithium3",
         "endpoints": {
             "kem_list": "/kem",
+            "sig_list": "/sig",
             "kyber_keygen": "/kyber/keygen",
             "kyber_encap": "/kyber/encapsulate",
             "kyber_decap": "/kyber/decapsulate",
@@ -81,6 +83,20 @@ def get_supported_kems():
     try:
         return {
             "supported_kems": oqs.get_enabled_kem_mechanisms()
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =====================================================
+# SUPPORTED SIGNATURE SCHEMES
+# =====================================================
+
+@app.get("/sig")
+def get_supported_sigs():
+    try:
+        return {
+            "supported_signatures": oqs.get_enabled_sig_mechanisms()
         }
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -165,17 +181,18 @@ def kyber_decapsulate(request: KyberDecapRequest):
 @app.get("/dilithium/keygen")
 def dilithium_keygen():
     """
-    Note:
-    python-oqs does NOT support exporting private keys.
+    Generate a Dilithium3 keypair.
+    Returns both public and private keys (base64 encoded).
     """
     try:
         with oqs.Signature("Dilithium3") as sig:
             public_key = sig.generate_keypair()
+            private_key = sig.export_secret_key()
 
         return {
             "algorithm": "Dilithium3",
             "public_key": base64.b64encode(public_key).decode(),
-            "note": "Private key is held internally (liboqs limitation)"
+            "private_key": base64.b64encode(private_key).decode()
         }
 
     except Exception as e:
@@ -188,16 +205,20 @@ def dilithium_keygen():
 
 @app.post("/dilithium/sign")
 def dilithium_sign(request: DilithiumSignRequest):
+    """
+    Sign a message using the provided private key.
+    The private key should come from /dilithium/keygen.
+    """
     try:
         message = request.message.encode()
+        private_key = base64.b64decode(request.private_key)
 
-        with oqs.Signature("Dilithium3") as sig:
-            public_key = sig.generate_keypair()
+        with oqs.Signature("Dilithium3", secret_key=private_key) as sig:
             signature = sig.sign(message)
 
         return {
-            "public_key": base64.b64encode(public_key).decode(),
-            "signature": base64.b64encode(signature).decode()
+            "signature": base64.b64encode(signature).decode(),
+            "message": request.message
         }
 
     except Exception as e:
@@ -219,7 +240,8 @@ def dilithium_verify(request: DilithiumVerifyRequest):
             valid = verifier.verify(message, signature, public_key)
 
         return {
-            "valid": bool(valid)
+            "valid": bool(valid),
+            "message": request.message
         }
 
     except Exception as e:
