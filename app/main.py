@@ -1,26 +1,23 @@
 import os
 import time
-import oqs
 import base64
+import oqs
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.backends import default_backend
 
+# ==========================================================
+# FASTAPI APP
+# ==========================================================
 
 app = FastAPI(
-    title="Post Quantum Crypto API",
-    description="Kyber768 + AES-256 Hybrid Encryption using liboqs",
-    version="1.0"
+    title="Post-Quantum Cryptography API",
+    description="Kyber768 KEM + Dilithium3 Signatures using liboqs",
+    version="1.0.0"
 )
 
-# Add CORS middleware for web access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,56 +26,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================
-# UTIL FUNCTIONS
-# ==========================
 
-def derive_aes_keys(shared_secret):
-    """Derive AES encryption key and IV from shared secret"""
-    hkdf = HKDF(
-        algorithm=hashes.SHA256(),
-        length=48,
-        salt=None,
-        info=b"pqc-aes-derivation",
-        backend=default_backend()
-    )
-    key_material = hkdf.derive(shared_secret)
-    return key_material[:32], key_material[32:48]
-
-
-def aes_encrypt(message: bytes, key: bytes, iv: bytes):
-    """Encrypt message using AES-256-CBC"""
-    padder = padding.PKCS7(128).padder()
-    padded = padder.update(message) + padder.finalize()
-
-    cipher = Cipher(
-        algorithms.AES(key),
-        modes.CBC(iv),
-        backend=default_backend()
-    )
-
-    encryptor = cipher.encryptor()
-    return encryptor.update(padded) + encryptor.finalize()
-
-
-def aes_decrypt(ciphertext: bytes, key: bytes, iv: bytes):
-    """Decrypt message using AES-256-CBC"""
-    cipher = Cipher(
-        algorithms.AES(key),
-        modes.CBC(iv),
-        backend=default_backend()
-    )
-
-    decryptor = cipher.decryptor()
-    padded = decryptor.update(ciphertext) + decryptor.finalize()
-
-    unpadder = padding.PKCS7(128).unpadder()
-    return unpadder.update(padded) + unpadder.finalize()
-
-
-# ==========================
+# ==========================================================
 # REQUEST MODELS
-# ==========================
+# ==========================================================
 
 class EncryptRequest(BaseModel):
     message: str
@@ -86,162 +37,195 @@ class EncryptRequest(BaseModel):
 
 class DecryptRequest(BaseModel):
     ciphertext: str
-    encrypted_aes_key: str
-    kyber_ciphertext: str
     private_key: str
-    iv: str
 
 
-# ==========================
-# ROUTES
-# ==========================
+class SignRequest(BaseModel):
+    message: str
+
+
+class VerifyRequest(BaseModel):
+    message: str
+    signature: str
+    public_key: str
+
+
+# ==========================================================
+# ROOT
+# ==========================================================
 
 @app.get("/")
 def root():
-    """Health check endpoint"""
     return {
         "status": "OK",
-        "service": "Post-Quantum Cryptography API",
-        "algorithm": "Kyber768 + AES-256",
+        "pqc": "liboqs",
+        "kem": "Kyber768",
+        "signature": "Dilithium3",
         "endpoints": [
-            "/",
             "/kem",
-            "/encrypt",
-            "/decrypt",
+            "/kyber/generate",
+            "/kyber/encapsulate",
+            "/kyber/decapsulate",
+            "/dilithium/generate",
+            "/dilithium/sign",
+            "/dilithium/verify",
             "/docs"
         ]
     }
 
 
-@app.get("/health")
-def health_check():
-    """Health check for monitoring"""
-    return {"status": "healthy", "timestamp": time.time()}
-
+# ==========================================================
+# SUPPORTED KEMS
+# ==========================================================
 
 @app.get("/kem")
-def supported_kem():
-    """Get list of supported Key Encapsulation Mechanisms"""
+def list_kems():
     try:
-        kems = oqs.get_enabled_KEM_mechanisms()
         return {
-            "supported_kem": kems,
-            "count": len(kems),
-            "using": "Kyber768"
+            "supported_kems": oqs.get_enabled_kem_mechanisms()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching KEMs: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/encrypt")
-def encrypt_data(request: EncryptRequest):
-    """
-    Hybrid Post-Quantum Encryption:
-    1. Generate Kyber768 keypair
-    2. Encapsulate shared secret with Kyber768
-    3. Derive AES-256 key from shared secret
-    4. Encrypt message with AES-256-CBC
-    
-    Returns: encrypted message, encrypted AES key, Kyber ciphertext, keys, IV
-    """
+# ==========================================================
+# KYBER — KEY GENERATION
+# ==========================================================
+
+@app.get("/kyber/generate")
+def kyber_generate():
     try:
-        message_bytes = request.message.encode()
-
-        # Generate random AES key and IV
-        aes_key = os.urandom(32)
-        aes_iv = os.urandom(16)
-
-        # Kyber768 Key Encapsulation
         with oqs.KeyEncapsulation("Kyber768") as kem:
-            # Generate Kyber keypair
             public_key = kem.generate_keypair()
             private_key = kem.export_secret_key()
 
-            # Encapsulate to get shared secret
-            start = time.time()
-            kyber_ciphertext, shared_secret = kem.encap_secret(public_key)
-            kem_time = time.time() - start
-
-            # Derive keys from shared secret
-            enc_key, enc_iv = derive_aes_keys(shared_secret)
-
-            # Encrypt the AES key with derived key
-            cipher = Cipher(
-                algorithms.AES(enc_key),
-                modes.CFB(enc_iv),
-                backend=default_backend()
-            )
-            encryptor = cipher.encryptor()
-            encrypted_aes_key = encryptor.update(aes_key) + encryptor.finalize()
-
-            # Encrypt the actual message with AES
-            encrypted_message = aes_encrypt(message_bytes, aes_key, aes_iv)
-
         return {
-            "message_encrypted": base64.b64encode(encrypted_message).decode(),
-            "encrypted_aes_key": base64.b64encode(encrypted_aes_key).decode(),
-            "kyber_ciphertext": base64.b64encode(kyber_ciphertext).decode(),
+            "algorithm": "Kyber768",
             "public_key": base64.b64encode(public_key).decode(),
-            "private_key": base64.b64encode(private_key).decode(),
-            "iv": base64.b64encode(aes_iv).decode(),
-            "kem_time_sec": round(kem_time, 6),
-            "algorithm": "Kyber768 + AES-256-CBC"
+            "private_key": base64.b64encode(private_key).decode()
         }
-    
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Encryption error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/decrypt")
-def decrypt_data(request: DecryptRequest):
-    """
-    Hybrid Post-Quantum Decryption:
-    1. Decapsulate Kyber768 ciphertext with private key to get shared secret
-    2. Derive AES-256 key from shared secret
-    3. Decrypt the encrypted AES key
-    4. Decrypt the message with decrypted AES key
-    
-    Returns: decrypted message
-    """
+# ==========================================================
+# KYBER — ENCAPSULATION
+# ==========================================================
+
+@app.post("/kyber/encapsulate")
+def kyber_encapsulate(public_key: str):
     try:
-        # Decode base64 inputs
-        encrypted_message = base64.b64decode(request.ciphertext)
-        encrypted_aes_key = base64.b64decode(request.encrypted_aes_key)
-        kyber_ciphertext = base64.b64decode(request.kyber_ciphertext)
-        private_key = base64.b64decode(request.private_key)
-        iv = base64.b64decode(request.iv)
+        public_key = base64.b64decode(public_key)
 
-        # Kyber768 Decapsulation
-        with oqs.KeyEncapsulation("Kyber768", secret_key=private_key) as kem:
-            # Decapsulate to get shared secret
-            shared_secret = kem.decap_secret(kyber_ciphertext)
-
-            # Derive keys from shared secret
-            dec_key, dec_iv = derive_aes_keys(shared_secret)
-
-            # Decrypt the AES key
-            cipher = Cipher(
-                algorithms.AES(dec_key),
-                modes.CFB(dec_iv),
-                backend=default_backend()
-            )
-            decryptor = cipher.decryptor()
-            aes_key = decryptor.update(encrypted_aes_key) + decryptor.finalize()
-
-            # Decrypt the actual message
-            decrypted_message = aes_decrypt(encrypted_message, aes_key, iv)
+        with oqs.KeyEncapsulation("Kyber768") as kem:
+            ciphertext, shared_secret = kem.encap_secret(public_key)
 
         return {
-            "decrypted_message": decrypted_message.decode(),
-            "algorithm": "Kyber768 + AES-256-CBC"
+            "ciphertext": base64.b64encode(ciphertext).decode(),
+            "shared_secret": base64.b64encode(shared_secret).decode()
         }
-    
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Decryption error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# For local testing
+# ==========================================================
+# KYBER — DECAPSULATION
+# ==========================================================
+
+@app.post("/kyber/decapsulate")
+def kyber_decapsulate(ciphertext: str, private_key: str):
+    try:
+        ciphertext = base64.b64decode(ciphertext)
+        private_key = base64.b64decode(private_key)
+
+        with oqs.KeyEncapsulation(
+            "Kyber768",
+            secret_key=private_key
+        ) as kem:
+            shared_secret = kem.decap_secret(ciphertext)
+
+        return {
+            "shared_secret": base64.b64encode(shared_secret).decode()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================================
+# DILITHIUM — KEY GENERATION
+# ==========================================================
+
+@app.get("/dilithium/generate")
+def dilithium_generate():
+    try:
+        with oqs.Signature("Dilithium3") as sig:
+            public_key = sig.generate_keypair()
+            private_key = sig.export_secret_key()
+
+        return {
+            "algorithm": "Dilithium3",
+            "public_key": base64.b64encode(public_key).decode(),
+            "private_key": base64.b64encode(private_key).decode()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================================
+# DILITHIUM — SIGN
+# ==========================================================
+
+@app.post("/dilithium/sign")
+def dilithium_sign(request: SignRequest):
+    try:
+        message = request.message.encode()
+
+        with oqs.Signature("Dilithium3") as sig:
+            sig.generate_keypair()
+            signature = sig.sign(message)
+
+        return {
+            "signature": base64.b64encode(signature).decode()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================================
+# DILITHIUM — VERIFY
+# ==========================================================
+
+@app.post("/dilithium/verify")
+def dilithium_verify(request: VerifyRequest):
+    try:
+        message = request.message.encode()
+        signature = base64.b64decode(request.signature)
+        public_key = base64.b64decode(request.public_key)
+
+        with oqs.Signature("Dilithium3") as verifier:
+            valid = verifier.verify(message, signature, public_key)
+
+        return {
+            "valid": bool(valid)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================================
+# LOCAL RUN
+# ==========================================================
+
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
