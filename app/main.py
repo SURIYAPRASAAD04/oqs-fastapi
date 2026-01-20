@@ -85,11 +85,7 @@ class DecryptRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {
-        "status": "running",
-        "algorithm": "Kyber768 + AES-256",
-        "lib": "Open Quantum Safe (liboqs)"
-    }
+    return {"status": "OK"}
 
 
 @app.get("/kem")
