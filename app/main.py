@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="Post-Quantum Cryptography API",
-    description="Kyber768 KEM + Dilithium3 Signatures using liboqs",
-    version="1.2.0"
+    description="ML-KEM-768 (Kyber768) + ML-DSA-65 (Dilithium3) using liboqs",
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -31,21 +31,21 @@ app.add_middleware(
 # REQUEST MODELS
 # =====================================================
 
-class KyberEncapRequest(BaseModel):
+class KemEncapRequest(BaseModel):
     public_key: str
 
 
-class KyberDecapRequest(BaseModel):
+class KemDecapRequest(BaseModel):
     ciphertext: str
     private_key: str
 
 
-class DilithiumSignRequest(BaseModel):
+class DsaSignRequest(BaseModel):
     message: str
-    private_key: str  # Now required for signing
+    private_key: str
 
 
-class DilithiumVerifyRequest(BaseModel):
+class DsaVerifyRequest(BaseModel):
     message: str
     signature: str
     public_key: str
@@ -59,17 +59,22 @@ class DilithiumVerifyRequest(BaseModel):
 def root():
     return {
         "service": "Post-Quantum Cryptography API",
-        "kem": "Kyber768",
-        "signature": "Dilithium3",
+        "kem": "ML-KEM-768 (NIST FIPS 203 - formerly Kyber768)",
+        "signature": "ML-DSA-65 (NIST FIPS 204 - formerly Dilithium3)",
+        "note": "Using NIST-standardized algorithm names",
         "endpoints": {
             "kem_list": "/kem",
             "sig_list": "/sig",
-            "kyber_keygen": "/kyber/keygen",
-            "kyber_encap": "/kyber/encapsulate",
-            "kyber_decap": "/kyber/decapsulate",
-            "dilithium_keygen": "/dilithium/keygen",
-            "dilithium_sign": "/dilithium/sign",
-            "dilithium_verify": "/dilithium/verify"
+            "ml_kem_keygen": "/ml-kem/keygen",
+            "ml_kem_encap": "/ml-kem/encapsulate",
+            "ml_kem_decap": "/ml-kem/decapsulate",
+            "ml_dsa_keygen": "/ml-dsa/keygen",
+            "ml_dsa_sign": "/ml-dsa/sign",
+            "ml_dsa_verify": "/ml-dsa/verify",
+            "legacy_endpoints": {
+                "kyber_keygen": "/kyber/keygen (deprecated, use /ml-kem/keygen)",
+                "dilithium_keygen": "/dilithium/keygen (deprecated, use /ml-dsa/keygen)"
+            }
         }
     }
 
@@ -103,18 +108,20 @@ def get_supported_sigs():
 
 
 # =====================================================
-# KYBER768 — KEY GENERATION
+# ML-KEM-768 (Kyber768) — KEY GENERATION
 # =====================================================
 
-@app.get("/kyber/keygen")
-def kyber_keygen():
+@app.get("/ml-kem/keygen")
+def ml_kem_keygen():
     try:
-        with oqs.KeyEncapsulation("Kyber768") as kem:
+        with oqs.KeyEncapsulation("ML-KEM-768") as kem:
             public_key = kem.generate_keypair()
             private_key = kem.export_secret_key()
 
         return {
-            "algorithm": "Kyber768",
+            "algorithm": "ML-KEM-768",
+            "standard": "NIST FIPS 203",
+            "formerly": "Kyber768",
             "public_key": base64.b64encode(public_key).decode(),
             "private_key": base64.b64encode(private_key).decode()
         }
@@ -123,16 +130,22 @@ def kyber_keygen():
         raise HTTPException(500, str(e))
 
 
+# Legacy endpoint for backward compatibility
+@app.get("/kyber/keygen")
+def kyber_keygen():
+    return ml_kem_keygen()
+
+
 # =====================================================
-# KYBER768 — ENCAPSULATION
+# ML-KEM-768 — ENCAPSULATION
 # =====================================================
 
-@app.post("/kyber/encapsulate")
-def kyber_encapsulate(request: KyberEncapRequest):
+@app.post("/ml-kem/encapsulate")
+def ml_kem_encapsulate(request: KemEncapRequest):
     try:
         public_key = base64.b64decode(request.public_key)
 
-        with oqs.KeyEncapsulation("Kyber768") as kem:
+        with oqs.KeyEncapsulation("ML-KEM-768") as kem:
             start = time.time()
             ciphertext, shared_secret = kem.encap_secret(public_key)
             elapsed = time.time() - start
@@ -140,25 +153,32 @@ def kyber_encapsulate(request: KyberEncapRequest):
         return {
             "ciphertext": base64.b64encode(ciphertext).decode(),
             "shared_secret": base64.b64encode(shared_secret).decode(),
-            "time_sec": round(elapsed, 6)
+            "time_sec": round(elapsed, 6),
+            "algorithm": "ML-KEM-768"
         }
 
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
+# Legacy endpoint
+@app.post("/kyber/encapsulate")
+def kyber_encapsulate(request: KemEncapRequest):
+    return ml_kem_encapsulate(request)
+
+
 # =====================================================
-# KYBER768 — DECAPSULATION
+# ML-KEM-768 — DECAPSULATION
 # =====================================================
 
-@app.post("/kyber/decapsulate")
-def kyber_decapsulate(request: KyberDecapRequest):
+@app.post("/ml-kem/decapsulate")
+def ml_kem_decapsulate(request: KemDecapRequest):
     try:
         ciphertext = base64.b64decode(request.ciphertext)
         private_key = base64.b64decode(request.private_key)
 
         with oqs.KeyEncapsulation(
-            "Kyber768",
+            "ML-KEM-768",
             secret_key=private_key
         ) as kem:
             start = time.time()
@@ -167,30 +187,39 @@ def kyber_decapsulate(request: KyberDecapRequest):
 
         return {
             "shared_secret": base64.b64encode(shared_secret).decode(),
-            "time_sec": round(elapsed, 6)
+            "time_sec": round(elapsed, 6),
+            "algorithm": "ML-KEM-768"
         }
 
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
+# Legacy endpoint
+@app.post("/kyber/decapsulate")
+def kyber_decapsulate(request: KemDecapRequest):
+    return ml_kem_decapsulate(request)
+
+
 # =====================================================
-# DILITHIUM3 — KEY GENERATION
+# ML-DSA-65 (Dilithium3) — KEY GENERATION
 # =====================================================
 
-@app.get("/dilithium/keygen")
-def dilithium_keygen():
+@app.get("/ml-dsa/keygen")
+def ml_dsa_keygen():
     """
-    Generate a Dilithium3 keypair.
+    Generate an ML-DSA-65 keypair (formerly Dilithium3).
     Returns both public and private keys (base64 encoded).
     """
     try:
-        with oqs.Signature("Dilithium3") as sig:
+        with oqs.Signature("ML-DSA-65") as sig:
             public_key = sig.generate_keypair()
             private_key = sig.export_secret_key()
 
         return {
-            "algorithm": "Dilithium3",
+            "algorithm": "ML-DSA-65",
+            "standard": "NIST FIPS 204",
+            "formerly": "Dilithium3",
             "public_key": base64.b64encode(public_key).decode(),
             "private_key": base64.b64encode(private_key).decode()
         }
@@ -199,53 +228,82 @@ def dilithium_keygen():
         raise HTTPException(500, str(e))
 
 
+# Legacy endpoint
+@app.get("/dilithium/keygen")
+def dilithium_keygen():
+    return ml_dsa_keygen()
+
+
 # =====================================================
-# DILITHIUM3 — SIGN
+# ML-DSA-65 — SIGN
 # =====================================================
 
-@app.post("/dilithium/sign")
-def dilithium_sign(request: DilithiumSignRequest):
+@app.post("/ml-dsa/sign")
+def ml_dsa_sign(request: DsaSignRequest):
     """
-    Sign a message using the provided private key.
-    The private key should come from /dilithium/keygen.
+    Sign a message using ML-DSA-65 with the provided private key.
+    The private key should come from /ml-dsa/keygen.
     """
     try:
         message = request.message.encode()
         private_key = base64.b64decode(request.private_key)
 
-        with oqs.Signature("Dilithium3", secret_key=private_key) as sig:
+        with oqs.Signature("ML-DSA-65", secret_key=private_key) as sig:
+            start = time.time()
             signature = sig.sign(message)
+            elapsed = time.time() - start
 
         return {
             "signature": base64.b64encode(signature).decode(),
-            "message": request.message
+            "message": request.message,
+            "time_sec": round(elapsed, 6),
+            "algorithm": "ML-DSA-65"
         }
 
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
+# Legacy endpoint
+@app.post("/dilithium/sign")
+def dilithium_sign(request: DsaSignRequest):
+    return ml_dsa_sign(request)
+
+
 # =====================================================
-# DILITHIUM3 — VERIFY
+# ML-DSA-65 — VERIFY
 # =====================================================
 
-@app.post("/dilithium/verify")
-def dilithium_verify(request: DilithiumVerifyRequest):
+@app.post("/ml-dsa/verify")
+def ml_dsa_verify(request: DsaVerifyRequest):
+    """
+    Verify an ML-DSA-65 signature.
+    """
     try:
         message = request.message.encode()
         signature = base64.b64decode(request.signature)
         public_key = base64.b64decode(request.public_key)
 
-        with oqs.Signature("Dilithium3") as verifier:
+        with oqs.Signature("ML-DSA-65") as verifier:
+            start = time.time()
             valid = verifier.verify(message, signature, public_key)
+            elapsed = time.time() - start
 
         return {
             "valid": bool(valid),
-            "message": request.message
+            "message": request.message,
+            "time_sec": round(elapsed, 6),
+            "algorithm": "ML-DSA-65"
         }
 
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# Legacy endpoint
+@app.post("/dilithium/verify")
+def dilithium_verify(request: DsaVerifyRequest):
+    return ml_dsa_verify(request)
 
 
 # =====================================================

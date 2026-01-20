@@ -1,6 +1,7 @@
 # ============================================
 # WORKING DOCKERFILE FOR RENDER DEPLOYMENT
-# Enables Kyber768 and Dilithium3
+# Uses NIST-standardized algorithm names
+# ML-KEM-768 (Kyber768) and ML-DSA-65 (Dilithium3)
 # ============================================
 
 FROM python:3.11-slim
@@ -18,7 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Build liboqs with Kyber and Dilithium3 enabled
+# Build liboqs with ML-KEM and ML-DSA enabled
+# Note: liboqs now uses NIST standardized names by default
 WORKDIR /tmp
 RUN git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git && \
     cd liboqs && \
@@ -30,14 +32,12 @@ RUN git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git && \
         -DOQS_ENABLE_KEM_NTRUPRIME=OFF \
         -DOQS_ENABLE_KEM_BIKE=OFF \
         -DOQS_ENABLE_KEM_HQC=OFF \
-        -DOQS_ENABLE_KEM_KYBER_512=ON \
-        -DOQS_ENABLE_KEM_KYBER_768=ON \
-        -DOQS_ENABLE_KEM_KYBER_1024=ON \
-        -DOQS_ENABLE_SIG_DILITHIUM_2=OFF \
-        -DOQS_ENABLE_SIG_DILITHIUM_3=ON \
-        -DOQS_ENABLE_SIG_DILITHIUM_5=OFF \
         -DOQS_ENABLE_SIG_FALCON=OFF \
         -DOQS_ENABLE_SIG_SPHINCS=OFF \
+        -DOQS_ENABLE_SIG_MAYO=OFF \
+        -DOQS_ENABLE_SIG_CROSS=OFF \
+        -DOQS_ENABLE_SIG_OV=OFF \
+        -DOQS_ENABLE_SIG_SNOVA=OFF \
         -DBUILD_SHARED_LIBS=ON \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
         .. && \
