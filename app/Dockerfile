@@ -31,7 +31,7 @@ RUN git clone --depth 1 https://github.com/open-quantum-safe/liboqs.git && \
         -DOQS_ENABLE_KEM_NTRUPRIME=OFF \
         -DOQS_ENABLE_KEM_BIKE=OFF \
         -DOQS_ENABLE_KEM_HQC=OFF \
-        -DOQS_ENABLE_SIG_DILITHIUM=OFF \
+        -DOQS_ENABLE_SIG_DILITHIUM=ON \
         -DOQS_ENABLE_SIG_FALCON=OFF \
         -DOQS_ENABLE_SIG_SPHINCS=OFF \
         -DOQS_ENABLE_KEM_KYBER_512=ON \
